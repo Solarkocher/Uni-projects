@@ -1,0 +1,221 @@
+options
+{
+    output logfile = TRUE;
+    output LaTeX = TRUE;
+    output LaTeX landscape = TRUE;
+};
+
+tryreduce
+{
+	Div[], Div_es[], Div_y[], TC_y[], TC_es[];
+};
+
+block STEADY_STATE
+{
+	definitions
+	{
+		# beta_es = (1 - alpha_es); 
+		gamma_y = 1 - alpha_y - beta_y;
+		gamma_es = 1 - alpha_es - beta_es;
+	
+		z = 1 / (beta_es * (1 - alpha_y - beta_y) + beta_y);
+		sigma_LC = sigma_L + sigma_C; 
+		# Z = beta_y ^ beta_y * gamma_y ^ gamma_y * oil ^ (gamma_es * gamma_y) / beta_es ^ (beta_es * gamma_y);
+	};
+
+	identities
+	{
+		P_y[ss] = 1;
+			
+		shock_y[ss] = 1; #steady state TFP must be equal to 1
+		shock_es[ss] = 1;
+		p_oil[ss] = 1;
+
+		r[ss] = 1 / beta - (1 - delta);
+		W[ss] = ((alpha_y / r[ss]) ^ alpha_y * 
+					(alpha_es / r[ss]) ^ (alpha_es * gamma_y) *
+					(gamma_es / p_oil[ss]) ^ (gamma_es * gamma_y) * 
+					beta_es ^ (gamma_y * beta_es) * 
+					beta_y ^ beta_y * 
+					gamma_y ^ gamma_y) ^ z;
+		P_es[ss] = (r[ss] / alpha_es) ^ alpha_es * (W[ss] / beta_es) ^ beta_es * (p_oil[ss] / gamma_es) ^ gamma_es;
+
+
+		Y[ss] = (r[ss] / (r[ss] - delta * P_y[ss] * (alpha_es * gamma_y + alpha_y))) ^ (sigma_C / sigma_LC) *
+				W[ss] ^ ((1 + sigma_L) / sigma_LC) * 
+				((beta_y + beta_es * gamma_y) * P_y[ss]) ^ (-sigma_L / sigma_LC); 
+
+		I[ss] = delta * P_y[ss] / r[ss] * (alpha_y + alpha_es * gamma_y) * Y[ss];
+		C[ss] = W[ss] ^ ((1 + sigma_L) / sigma_C) * 
+			((beta_y + beta_es * gamma_y) * P_y[ss]) ^ (-sigma_L / sigma_C) * Y[ss] ^ (-sigma_L / sigma_C);
+
+
+		X_es_d[ss] = P_y[ss] * Y[ss] * (1 - alpha_y - beta_y) / P_es[ss];
+		X_es_s[ss] = X_es_d[ss];
+
+		K_s[ss] = K_es_d[ss] + K_y_d[ss];
+		K_es_d[ss] = P_es[ss] * X_es_s[ss] * alpha_es / r[ss]; 
+		K_y_d[ss] = P_y[ss] * Y[ss] * alpha_y / r[ss]; 
+		
+		L_s[ss] = L_es_d[ss] + L_y_d[ss];
+		L_es_d[ss] = P_es[ss] * X_es_s[ss] * beta_es / W[ss];
+		L_y_d[ss] = P_y[ss] * Y[ss] * beta_y / W[ss];
+
+		oil[ss] = P_es[ss] * gamma_es * X_es_s[ss] / p_oil[ss];
+	
+		Div[ss] = Div_es[ss] + Div_y[ss];
+		TC_y[ss] = -(L_y_d[ss] * W[ss] + K_y_d[ss] * r[ss] + X_es_d[ss] * P_es[ss]);
+		TC_es[ss] = -(L_es_d[ss] * W[ss] + K_es_d[ss] * r[ss] + p_oil[ss] * oil[ss]);
+
+		Div_es[ss] =  X_es_s[ss] * P_es[ss] + TC_es[ss];
+		Div_y[ss] = Y[ss] * P_y[ss] + TC_y[ss];
+
+		lambda[ss] = C[ss] ^ (-sigma_C);
+		Q[ss] = lambda[ss];
+		
+		u[ss] = C[ss] ^ (1 - sigma_C) / (1 - sigma_C)	  
+			  - L_s[ss] ^ (1 + sigma_L) / (1 + sigma_L);
+		U[ss] = u[ss] / (1 - beta);
+
+	};
+};
+
+block CONSUMER
+{
+    	definitions
+    	{
+			# household gains utility by consuming final goods and energy services
+			# and loses utility from working
+        	u[] = C[] ^ (1 - sigma_C) / (1 - sigma_C)	  
+			  - L_s[] ^ (1 + sigma_L) / (1 + sigma_L);
+    	};
+
+    	controls
+    	{
+			# household selects consumption (goods + energy), investment, capital and labor
+			C[], I[], K_s[], L_s[]; 
+    	};
+	
+    	objective
+    	{
+			# Bellman eq: how the household choooses between current and future utility
+        	U[] = u[] + beta * E[][U[1]];
+    	};
+	
+   		constraints
+    	{
+        	P_y[] * (I[] + C[]) = Div[] + r[] * K_s[-1] + W[] * L_s[] + p_oil[] * oil[]: lambda[]; 
+			K_s[] = (1 - delta) * K_s[-1] + I[] * phi_I / 2 * (1 - (I[] / I[-1] - 1) ^ 2): Q[];
+		};
+
+    	calibration
+   	 	{
+        	delta = 0.025;
+        	beta = 0.99;
+			phi_I = 2;
+ 			
+			# CRRA: Arrow-pratt risk aversion higher sigma_C, less willing to trade future consumption for current
+       	 	sigma_C = 1.2;
+			# Inverse frisch elastcity. Elasticity between labour and work  
+        	sigma_L = 2.9; 
+    	};
+};
+
+block Y_FIRM
+{
+   	controls
+   	{
+		# choose capital, labor, energy and ouput
+		K_y_d[], L_y_d[], X_es_d[]; 
+	};
+	
+   	objective
+   	{
+		TC_y[] = -(L_y_d[] * W[] + K_y_d[] * r[] + X_es_d[] * P_es[]);
+	};
+	
+   	constraints
+	{
+		# produces Y using labor, capital and energy
+		Y[] = shock_y[] * K_y_d[] ^ alpha_y * L_y_d[] ^ beta_y * X_es_d[] ^ (1 - alpha_y - beta_y): P_y[];    	
+	};
+
+	identities
+	{
+		# Numeraire
+		P_y[] = 1;
+		Div_y[] = Y[] * P_y[] + TC_y[];
+	};
+	
+    calibration
+    {
+        alpha_y = 0.33;  
+		beta_y = 0.20;  
+    };
+};
+
+
+block ES_FIRM  # energy producing firm buys oil (exogenous)
+{
+	controls
+	{
+		# Do we need oil here? I also added X_es (output of energy producing firm)
+		K_es_d[], L_es_d[], oil[]; 
+	};
+	
+	objective
+	{
+		TC_es[] = -(L_es_d[] * W[] + K_es_d[] * r[] + p_oil[] * oil[]);			
+	};
+	
+	constraints
+	{
+		X_es_s[] = shock_es[] * K_es_d[] ^ alpha_es * L_es_d[] ^ beta_es * oil[] ^ (1 - alpha_es -  beta_es): P_es[]; 
+	};
+
+	identities
+	{
+		Div_es[] = X_es_s[] * P_es[] + TC_es[];
+	};
+
+	calibration
+	{
+		alpha_es = 0.33; # elasticty of labour 
+		beta_es = 0.22; 
+	};
+
+};
+
+block EQULIBRIUM
+{
+	identities
+	{		
+		K_s[-1] = K_es_d[] + K_y_d[]; 
+		L_s[] = L_es_d[] + L_y_d[];
+		X_es_s[] = X_es_d[]; 
+		Div[] = Div_es[] + Div_y[]; 
+	};
+};
+
+
+block EXOG 
+{
+    identities
+    {
+		log(shock_y[]) = phi_y * log(shock_y[-1]) + epsilon_y[]; 
+		log(shock_es[]) = phi_es * log(shock_es[-1]) + epsilon_es[];
+		log(p_oil[]) = phi_p_oil * log(p_oil[-1]) + epsilon_p_oil[]; 
+    };
+
+    shocks
+    {
+		epsilon_es[], epsilon_y[], epsilon_p_oil[];
+    };
+
+    calibration
+    {
+		phi_y = 0.53;
+		phi_es = 0.53;
+		phi_p_oil = 0.97;
+    };
+};
